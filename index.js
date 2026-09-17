@@ -119,10 +119,10 @@ async function submitFal(
   const data = await response.json();
 
   if (!response.ok) {
-    throw new Error(
-      `fal submit failed: ${JSON.stringify(data)}`
-    );
-  }
+  throw new Error(
+    `fal submit failed | HTTP ${response.status} | ${JSON.stringify(data)}`
+  );
+}
 
   return data;
 }
