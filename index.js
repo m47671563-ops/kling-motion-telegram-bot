@@ -1,4 +1,46 @@
-const MODEL = "fal-ai/kling-video/v3/standard/motion-control";
+async function tg(env, method, body) {
+  const url =
+    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
+
+  const r = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  const raw = await r.text();
+
+  console.log("TELEGRAM RESPONSE", {
+    method: method,
+    status: r.status,
+    response: raw,
+  });
+
+  if (!r.ok) {
+    throw new Error(
+      `Telegram HTTP ${r.status}: ${raw}`
+    );
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(
+      `Telegram returned invalid JSON: ${raw}`
+    );
+  }
+
+  if (!data.ok) {
+    throw new Error(
+      `Telegram API error: ${raw}`
+    );
+  }
+
+  return data.result;
+}
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
