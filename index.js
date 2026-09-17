@@ -49,19 +49,7 @@ function json(data, status = 200) {
   });
 }
 
-async function tg(env, method, body) {
-  const r = await fetch(
-    `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
-    {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-    }
-  );
-  const data = await r.json();
-  if (!data.ok) throw new Error(`Telegram ${method}: ${JSON.stringify(data)}`);
-  return data.result;
-}
+
 
 async function getTelegramFileUrl(env, fileId) {
   const file = await tg(env, "getFile", { file_id: fileId });
