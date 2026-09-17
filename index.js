@@ -53,13 +53,20 @@ async function getTelegramFileUrl(env, fileId) {
     file_id: fileId,
   });
 
-  return `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`;
+  if (!file?.file_path) {
+    throw new Error("Telegram file_path tidak ditemukan");
+  }
+
+  return (
+    `https://api.telegram.org/file/bot` +
+    `${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`
+  );
 }
 
 function getPhotoId(message) {
   const photos = message?.photo;
 
-  if (!photos?.length) {
+  if (!photos || !photos.length) {
     return null;
   }
 
@@ -71,7 +78,10 @@ function getVideoId(message) {
     return message.video.file_id;
   }
 
-  if (message?.document?.mime_type?.startsWith("video/")) {
+  if (
+    message?.document?.mime_type &&
+    message.document.mime_type.startsWith("video/")
+  ) {
     return message.document.file_id;
   }
 
@@ -81,7 +91,7 @@ function getVideoId(message) {
 function extractImageIdFromReply(message) {
   const text = message?.reply_to_message?.text || "";
 
-  const match = text.match(/^IMG:([A-Za-z0-9_-]+)$/m);
+  const match = text.match(/IMG:([A-Za-z0-9_-]+)/);
 
   return match ? match[1] : null;
 }
@@ -95,12 +105,10 @@ async function submitFal(
 ) {
   const r = await fetch(`https://queue.fal.run/${MODEL}`, {
     method: "POST",
-
     headers: {
       Authorization: `Key ${env.FAL_KEY}`,
       "Content-Type": "application/json",
     },
-
     body: JSON.stringify({
       input: {
         image_url: imageUrl,
@@ -108,24 +116,26 @@ async function submitFal(
         character_orientation: orientation,
         keep_original_sound: true,
       },
-
       webhookUrl: callbackUrl,
     }),
   });
 
-  const data = await r.json();
+  const raw = await r.text();
+
+  console.log("FAL SUBMIT RESPONSE", {
+    status: r.status,
+    response: raw,
+  });
 
   if (!r.ok) {
-    throw new Error(
-      `fal submit failed: ${JSON.stringify(data)}`
-    );
+    throw new Error(`fal submit failed: ${raw}`);
   }
 
-  return data;
+  return JSON.parse(raw);
 }
 
 async function handleTelegramUpdate(update, env) {
-  const message = update.message;
+  const message = update?.message;
 
   if (!message) {
     return;
@@ -133,17 +143,12 @@ async function handleTelegramUpdate(update, env) {
 
   const chatId = message.chat.id;
 
-  // =========================
-  // START / HELP
-  // =========================
-
   if (
     message.text === "/start" ||
     message.text === "/help"
   ) {
     await tg(env, "sendMessage", {
       chat_id: chatId,
-
       text:
         "🔥 Kling Motion Bot siap!\n\n" +
         "1. Kirim FOTO karakter/pakaian.\n" +
@@ -155,16 +160,11 @@ async function handleTelegramUpdate(update, env) {
     return;
   }
 
-  // =========================
-  // FOTO
-  // =========================
-
   const photoId = getPhotoId(message);
 
   if (photoId) {
     await tg(env, "sendMessage", {
       chat_id: chatId,
-
       text:
         "📸 Foto diterima!\n\n" +
         "Sekarang kirim VIDEO referensi gerakan " +
@@ -175,10 +175,6 @@ async function handleTelegramUpdate(update, env) {
     return;
   }
 
-  // =========================
-  // VIDEO
-  // =========================
-
   const videoId = getVideoId(message);
 
   if (videoId) {
@@ -187,49 +183,36 @@ async function handleTelegramUpdate(update, env) {
     if (!imageId) {
       await tg(env, "sendMessage", {
         chat_id: chatId,
-
         text:
-          "⚠️ Reply pesan bot dengan video " +
-          "supaya foto dan video bisa dipasangkan.",
+          "⚠️ Video belum dipasangkan dengan foto.\n\n" +
+          "Silakan Reply pesan bot yang berisi IMG: dengan video.",
       });
 
       return;
     }
 
     /*
-      PENTING:
-
-      Jangan memasukkan imageId + videoId ke callback_data.
-
-      Telegram punya batas panjang callback_data.
-      Jadi tombol hanya mengirim:
-
-      gen|image
-      gen|video
-
-      ID foto dan video disimpan di TEXT pesan Telegram.
+      Callback data sengaja dibuat pendek.
+      Telegram membatasi callback_data maksimal 64 byte.
     */
 
     await tg(env, "sendMessage", {
       chat_id: chatId,
-
       text:
         "🎬 Video diterima!\n\n" +
         `IMG:${imageId}\n` +
         `VID:${videoId}\n\n` +
         "Pilih orientasi:",
-
       reply_markup: {
         inline_keyboard: [
           [
             {
               text: "🖼️ Image",
-              callback_data: "gen|image",
+              callback_data: "image",
             },
-
             {
               text: "🎥 Video",
-              callback_data: "gen|video",
+              callback_data: "video",
             },
           ],
         ],
@@ -240,12 +223,20 @@ async function handleTelegramUpdate(update, env) {
   }
 }
 
-async function handleCallback(
-  update,
-  env,
-  requestUrl
-) {
-  const q = update.callback_query;
+function extractIdsFromCallbackMessage(message) {
+  const text = message?.text || "";
+
+  const imageMatch = text.match(/IMG:([A-Za-z0-9_-]+)/);
+  const videoMatch = text.match(/VID:([A-Za-z0-9_-]+)/);
+
+  return {
+    imageId: imageMatch ? imageMatch[1] : null,
+    videoId: videoMatch ? videoMatch[1] : null,
+  };
+}
+
+async function handleCallback(update, env, requestUrl) {
+  const q = update?.callback_query;
 
   if (!q?.data) {
     return;
@@ -255,95 +246,52 @@ async function handleCallback(
     callback_query_id: q.id,
   });
 
-  const parts = q.data.split("|");
+  const orientation = q.data;
 
   if (
-    parts.length !== 2 ||
-    parts[0] !== "gen"
+    orientation !== "image" &&
+    orientation !== "video"
   ) {
     return;
   }
 
-  const orientation = parts[1];
-
   const chatId = q.message.chat.id;
 
-  /*
-    Ambil IMG dan VID dari text pesan
-    yang mempunyai tombol.
-  */
+  const ids = extractIdsFromCallbackMessage(q.message);
 
-  const text = q.message?.text || "";
-
-  const imageMatch = text.match(
-    /IMG:([A-Za-z0-9_-]+)/
-  );
-
-  const videoMatch = text.match(
-    /VID:([A-Za-z0-9_-]+)/
-  );
-
-  const imageId = imageMatch
-    ? imageMatch[1]
-    : null;
-
-  const videoId = videoMatch
-    ? videoMatch[1]
-    : null;
-
-  if (!imageId || !videoId) {
+  if (!ids.imageId || !ids.videoId) {
     await tg(env, "sendMessage", {
       chat_id: chatId,
-
       text:
-        "❌ Data foto/video tidak ditemukan.\n\n" +
-        "Kirim ulang foto dan video ya ngab.",
+        "❌ ID foto/video tidak ditemukan.\n" +
+        "Silakan kirim ulang foto dan video.",
     });
 
     return;
   }
 
-  // =========================
-  // STATUS PROSES
-  // =========================
-
   await tg(env, "sendMessage", {
     chat_id: chatId,
-
     text:
       "⏳ Oke ngab, Kling lagi proses.\n\n" +
       "Tunggu sampai videonya jadi ya 🔥",
   });
 
   try {
-    // =========================
-    // TELEGRAM FILE URL
-    // =========================
+    const imageUrl = await getTelegramFileUrl(
+      env,
+      ids.imageId
+    );
 
-    const imageUrl =
-      await getTelegramFileUrl(
-        env,
-        imageId
-      );
-
-    const videoUrl =
-      await getTelegramFileUrl(
-        env,
-        videoId
-      );
-
-    // =========================
-    // FAL WEBHOOK
-    // =========================
+    const videoUrl = await getTelegramFileUrl(
+      env,
+      ids.videoId
+    );
 
     const callbackUrl =
       `${new URL(requestUrl).origin}` +
       `/fal-webhook?chat_id=` +
       `${encodeURIComponent(chatId)}`;
-
-    // =========================
-    // KIRIM KE FAL / KLING
-    // =========================
 
     const result = await submitFal(
       env,
@@ -353,35 +301,86 @@ async function handleCallback(
       callbackUrl
     );
 
-    console.log(
-      "FAL REQUEST:",
-      result.request_id
-    );
+    console.log("FAL REQUEST ID:", result?.request_id);
 
   } catch (e) {
-    console.error(e);
+    console.error("HANDLE CALLBACK ERROR:", e);
 
     await tg(env, "sendMessage", {
       chat_id: chatId,
-
       text:
         "❌ Gagal mengirim ke Kling/fal.ai.\n\n" +
-        "Cek koneksi FAL_KEY lalu coba lagi.",
+        "Coba lagi ya ngab.",
     });
   }
 }
 
-async function handleFalWebhook(
-  request,
-  env
-) {
+async function handleFalWebhook(request, env) {
   const url = new URL(request.url);
 
-  const chatId =
-    url.searchParams.get("chat_id");
+  const chatId = url.searchParams.get("chat_id");
 
   if (!chatId) {
     return json(
       {
         ok: false,
         error: "missing chat_id",
+      },
+      400
+    );
+  }
+
+  let payload;
+
+  try {
+    payload = await request.json();
+  } catch (e) {
+    console.error("INVALID FAL WEBHOOK JSON:", e);
+
+    return json(
+      {
+        ok: false,
+        error: "invalid json",
+      },
+      400
+    );
+  }
+
+  console.log("FAL WEBHOOK:", payload);
+
+  if (payload?.status !== "OK") {
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text:
+        "❌ Kling gagal membuat video.\n\n" +
+        "Coba lagi dengan video referensi lain.",
+    });
+
+    return json({
+      ok: true,
+    });
+  }
+
+  const videoUrl =
+    payload?.payload?.video?.url ||
+    payload?.video?.url;
+
+  if (!videoUrl) {
+    console.error(
+      "HASIL KLING TIDAK ADA VIDEO URL:",
+      payload
+    );
+
+    await tg(env, "sendMessage", {
+      chat_id: chatId,
+      text:
+        "❌ Hasil Kling tidak berisi URL video.",
+    });
+
+    return json({
+      ok: true,
+    });
+  }
+
+  try {
+    await tg(env, "sendVideo",
