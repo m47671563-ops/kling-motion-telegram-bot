@@ -314,10 +314,14 @@ async function handleCallback(
     );
 
   } catch (error) {
-    console.error(
-      "HANDLE CALLBACK ERROR:",
-      error
-    );
+  console.error(
+    "HANDLE CALLBACK ERROR:",
+    error?.message || String(error)
+  );
+  console.error(
+    "HANDLE CALLBACK STACK:",
+    error?.stack || ""
+  );
 
     await tg(env, "sendMessage", {
       chat_id: chatId,
