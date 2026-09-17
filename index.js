@@ -1,4 +1,4 @@
-async function tg(env, method, body) {
+// clean deploy    async function tg(env, method, body) {
   const url =
     `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`;
 
