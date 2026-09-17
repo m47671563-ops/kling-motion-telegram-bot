@@ -33,7 +33,6 @@ STATE = {}
 if not TOKEN or not FAL_KEY:
     raise RuntimeError("TELEGRAM_BOT_TOKEN dan FAL_KEY wajib diisi.")
 
-
 PROMPTS = {
     "natural": (
         "A relaxed fashion lifestyle moment. "
@@ -99,7 +98,6 @@ def orientations():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     STATE[update.effective_user.id] = {}
-
     await update.message.reply_text(
         "🔥 KLING MOTION 3.0 BOT\n\n"
         "1. Kirim FOTO model/produk 📸\n"
@@ -145,11 +143,9 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     obj = update.message.video or update.message.document
-
     telegram_file = await context.bot.get_file(obj.file_id)
 
     suffix = ".mp4"
-
     if (
         update.message.document
         and update.message.document.file_name
@@ -191,7 +187,6 @@ async def preset(
 
     if selected == "custom":
         state["custom"] = True
-
         await query.message.reply_text(
             "✍️ Ketik gerakan custom.\n\n"
             "Contoh:\n"
@@ -229,6 +224,33 @@ async def text(
     )
 
 
+def generate(state):
+    image_url = fal_client.upload_file(state["image"])
+    video_url = fal_client.upload_file(state["video"])
+
+    preset_name = state.get("preset", "natural")
+    prompt = state.get(
+        "custom_prompt",
+        PROMPTS.get(preset_name, PROMPTS["natural"]),
+    )
+
+    result = fal_client.subscribe(
+        MODEL,
+        arguments={
+            "prompt": prompt,
+            "image_url": image_url,
+            "video_url": video_url,
+            "character_orientation": state.get(
+                "orientation",
+                "video",
+            ),
+            "keep_original_sound": True,
+        },
+    )
+
+    return result["video"]["url"]
+
+
 async def orientation(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE,
@@ -254,9 +276,94 @@ async def orientation(
     )
 
     try:
-        result = await asyncio.to_thread(
+        video_url = await asyncio.to_thread(
             generate,
             state,
         )
 
-        video
+        await query.message.reply_video(
+            video=video_url,
+            caption="🔥 Selesai ngab! Kling Motion 3.0",
+        )
+
+    except Exception as exc:
+        logging.exception("Generate error")
+        await query.message.reply_text(
+            "❌ Generate gagal.\n"
+            f"Detail: {exc}"
+        )
+
+
+async def error(update, context):
+    logging.exception(
+        "Unhandled error",
+        exc_info=context.error,
+    )
+
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(
+        CallbackQueryHandler(
+            preset,
+            pattern=r"^preset:",
+        )
+    )
+    app.add_handler(
+        CallbackQueryHandler(
+            orientation,
+            pattern=r"^orientation:",
+        )
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.PHOTO,
+            photo,
+        )
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.VIDEO | filters.Document.VIDEO,
+            video,
+        )
+    )
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            text,
+        )
+    )
+
+    app.add_error_handler(error)
+
+    port = int(os.getenv("PORT", "10000"))
+    external_url = os.getenv("RENDER_EXTERNAL_URL")
+
+    if not external_url:
+        raise RuntimeError(
+            "RENDER_EXTERNAL_URL tidak tersedia"
+        )
+
+    webhook_path = "/telegram"
+    webhook_url = (
+        external_url.rstrip("/")
+        + webhook_path
+    )
+
+    print("Kling Motion Telegram Bot aktif.")
+    print("Webhook URL:", webhook_url)
+
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=webhook_path.lstrip("/"),
+        webhook_url=webhook_url,
+        drop_pending_updates=True,
+    )
+
+
+if __name__ == "__main__":
+    main()
+    
