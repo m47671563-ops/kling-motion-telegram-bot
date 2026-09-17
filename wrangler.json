@@ -1,11 +1,8 @@
 {
   "name": "kling-motion-telegram-bot",
-"main": "index.js",
+  "main": "index.js",
   "compatibility_date": "2026-09-17",
   "observability": {
     "enabled": true
-  },
-  "secrets": {
-    "required": ["TELEGRAM_BOT_TOKEN", "FAL_KEY"]
   }
 }
