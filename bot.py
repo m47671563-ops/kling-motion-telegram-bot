@@ -6,7 +6,6 @@ from pathlib import Path
 
 import fal_client
 from dotenv import load_dotenv
-
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     Application,
@@ -21,7 +20,6 @@ load_dotenv()
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 FAL_KEY = os.getenv("FAL_KEY")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 MODEL = "fal-ai/kling-video/v3/standard/motion-control"
 
@@ -34,9 +32,6 @@ STATE = {}
 
 if not TOKEN or not FAL_KEY:
     raise RuntimeError("TELEGRAM_BOT_TOKEN dan FAL_KEY wajib diisi.")
-
-if not WEBHOOK_URL:
-    raise RuntimeError("WEBHOOK_URL wajib diisi di Render Environment Variables.")
 
 
 PROMPTS = {
@@ -65,21 +60,21 @@ def presets():
         [
             InlineKeyboardButton(
                 "🌿 Natural Tipis",
-                callback_data="preset:natural"
+                callback_data="preset:natural",
             ),
             InlineKeyboardButton(
                 "😎 Cool Pose",
-                callback_data="preset:pose"
+                callback_data="preset:pose",
             ),
         ],
         [
             InlineKeyboardButton(
                 "🚶 Jalan Pelan",
-                callback_data="preset:walk"
+                callback_data="preset:walk",
             ),
             InlineKeyboardButton(
                 "✍️ Custom",
-                callback_data="preset:custom"
+                callback_data="preset:custom",
             ),
         ],
     ])
@@ -90,61 +85,60 @@ def orientations():
         [
             InlineKeyboardButton(
                 "🖼️ Ikuti orientasi foto",
-                callback_data="orientation:image"
+                callback_data="orientation:image",
             )
         ],
         [
             InlineKeyboardButton(
                 "🎥 Ikuti orientasi video",
-                callback_data="orientation:video"
+                callback_data="orientation:video",
             )
         ],
     ])
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    STATE[uid] = {}
+    STATE[update.effective_user.id] = {}
 
     await update.message.reply_text(
         "🔥 KLING MOTION 3.0 BOT\n\n"
         "1. Kirim FOTO model/produk 📸\n"
         "2. Kirim VIDEO referensi gerakan 🎥\n"
-        "3. Pilih preset\n\n"
-        "Kalau mau hasil sekitar 4 detik, "
-        "gunakan video referensi sekitar 4 detik."
+        "3. Pilih preset gerakan\n\n"
+        "Untuk hasil sekitar 4 detik, gunakan video referensi "
+        "sekitar 4 detik."
     )
 
 
 async def photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    s = STATE.setdefault(uid, {})
+    state = STATE.setdefault(uid, {})
 
-    f = await context.bot.get_file(
+    telegram_file = await context.bot.get_file(
         update.message.photo[-1].file_id
     )
 
     tmp = tempfile.NamedTemporaryFile(
         delete=False,
-        suffix=".jpg"
+        suffix=".jpg",
     )
     tmp.close()
 
-    await f.download_to_drive(tmp.name)
+    await telegram_file.download_to_drive(tmp.name)
 
-    s["image"] = tmp.name
+    state["image"] = tmp.name
 
     await update.message.reply_text(
-        "✅ Foto masuk.\n"
+        "✅ Foto masuk.\n\n"
         "Sekarang kirim VIDEO referensi gerakan 🎥"
     )
 
 
 async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    s = STATE.setdefault(uid, {})
+    state = STATE.setdefault(uid, {})
 
-    if "image" not in s:
+    if "image" not in state:
         await update.message.reply_text(
             "Kirim FOTO dulu ngab 📸"
         )
@@ -152,10 +146,7 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     obj = update.message.video or update.message.document
 
-    if not obj:
-        return
-
-    f = await context.bot.get_file(obj.file_id)
+    telegram_file = await context.bot.get_file(obj.file_id)
 
     suffix = ".mp4"
 
@@ -170,225 +161,102 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     tmp = tempfile.NamedTemporaryFile(
         delete=False,
-        suffix=suffix
+        suffix=suffix,
     )
     tmp.close()
 
-    await f.download_to_drive(tmp.name)
+    await telegram_file.download_to_drive(tmp.name)
 
-    s["video"] = tmp.name
+    state["video"] = tmp.name
 
     await update.message.reply_text(
-        "✅ Video masuk.\n"
+        "✅ Video masuk.\n\n"
         "Pilih gerakan:",
-        reply_markup=presets()
+        reply_markup=presets(),
     )
 
 
-async def preset(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
+async def preset(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
+    query = update.callback_query
+    await query.answer()
 
-    uid = q.from_user.id
-    s = STATE.get(uid, {})
+    uid = query.from_user.id
+    state = STATE.setdefault(uid, {})
 
-    p = q.data.split(":", 1)[1]
-    s["preset"] = p
+    selected = query.data.split(":", 1)[1]
+    state["preset"] = selected
 
-    if p == "custom":
-        s["custom"] = True
+    if selected == "custom":
+        state["custom"] = True
 
-        await q.message.reply_text(
-            "Ketik gerakan custom.\n\n"
+        await query.message.reply_text(
+            "✍️ Ketik gerakan custom.\n\n"
             "Contoh:\n"
-            "sedikit menoleh ke samping lalu "
-            "memegang ujung cardigan secara natural."
+            "sedikit menoleh ke samping lalu memegang "
+            "ujung cardigan secara natural."
         )
-    else:
-        await q.message.reply_text(
-            "Pilih orientasi karakter:",
-            reply_markup=orientations()
-        )
+        return
+
+    await query.message.reply_text(
+        "Pilih orientasi karakter:",
+        reply_markup=orientations(),
+    )
 
 
-async def text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def text(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+):
     uid = update.effective_user.id
-    s = STATE.get(uid, {})
+    state = STATE.get(uid, {})
 
-    if s.get("custom"):
-        s["custom_prompt"] = update.message.text.strip()
-        s["custom"] = False
+    if state.get("custom"):
+        state["custom_prompt"] = update.message.text.strip()
+        state["custom"] = False
 
         await update.message.reply_text(
-            "✅ Custom tersimpan.\n"
-            "Pilih orientasi:",
-            reply_markup=orientations()
+            "✅ Custom tersimpan.\n\n"
+            "Sekarang pilih orientasi:",
+            reply_markup=orientations(),
         )
-    else:
-        await update.message.reply_text(
-            "Ketik /start untuk mulai dari awal."
-        )
+        return
+
+    await update.message.reply_text(
+        "Ketik /start untuk mulai dari awal."
+    )
 
 
 async def orientation(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE
+    context: ContextTypes.DEFAULT_TYPE,
 ):
-    q = update.callback_query
-    await q.answer()
+    query = update.callback_query
+    await query.answer()
 
-    uid = q.from_user.id
-    s = STATE.get(uid, {})
+    uid = query.from_user.id
+    state = STATE.get(uid, {})
 
-    if "image" not in s or "video" not in s:
-        await q.message.reply_text(
-            "Foto + video belum lengkap.\n"
+    if "image" not in state or "video" not in state:
+        await query.message.reply_text(
+            "Foto + video belum lengkap. "
             "Ketik /start."
         )
         return
 
-    s["orientation"] = q.data.split(":", 1)[1]
+    state["orientation"] = query.data.split(":", 1)[1]
 
-    await q.message.reply_text(
-        "⏳ Lagi generate Kling 3.0 Motion Control..."
+    await query.message.reply_text(
+        "⏳ Lagi generate Kling 3.0 Motion Control...\n"
+        "Tunggu sebentar ngab 🔥"
     )
 
     try:
-        result = await asyncio.to_thread(generate, s)
-
-        url = result["video"]["url"]
-
-        await q.message.reply_video(
-            video=url,
-            caption="🔥 Kling 3.0 Motion Control selesai"
+        result = await asyncio.to_thread(
+            generate,
+            state,
         )
 
-    except Exception as e:
-        logging.exception("generation failed")
-
-        await q.message.reply_text(
-            "❌ Gagal generate:\n"
-            + str(e)[:700]
-        )
-
-    finally:
-        cleanup(uid)
-
-
-def generate(s):
-    image_url = fal_client.upload_file(s["image"])
-    video_url = fal_client.upload_file(s["video"])
-
-    if s.get("preset") == "custom":
-        prompt = s.get("custom_prompt", "")
-    else:
-        prompt = PROMPTS.get(
-            s.get("preset"),
-            PROMPTS["natural"]
-        )
-
-    prompt += (
-        " Preserve identity, face, hairstyle, clothing design, "
-        "colors, fabric texture and body proportions. "
-        "Avoid sudden motion, warping, flickering and "
-        "exaggerated advertising gestures."
-    )
-
-    return fal_client.subscribe(
-        MODEL,
-        arguments={
-            "prompt": prompt,
-            "image_url": image_url,
-            "video_url": video_url,
-            "character_orientation": s.get(
-                "orientation",
-                "video"
-            ),
-        },
-    )
-
-
-def cleanup(uid):
-    s = STATE.pop(uid, {})
-
-    for key in ("image", "video"):
-        if s.get(key):
-            try:
-                os.unlink(s[key])
-            except OSError:
-                pass
-
-
-async def error(update, context):
-    logging.exception(
-        "Unhandled error",
-        exc_info=context.error
-    )
-
-
-def main():
-    app = Application.builder().token(TOKEN).build()
-
-    app.add_handler(
-        CommandHandler("start", start)
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            preset,
-            pattern=r"^preset:"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            orientation,
-            pattern=r"^orientation:"
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.PHOTO,
-            photo
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.VIDEO | filters.Document.VIDEO,
-            video
-        )
-    )
-
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            text
-        )
-    )
-
-    app.add_error_handler(error)
-
-    port = int(os.getenv("PORT", "10000"))
-
-    webhook_path = "/telegram"
-
-    webhook_url = WEBHOOK_URL.rstrip("/") + webhook_path
-
-    print(
-        f"Kling Motion Telegram Bot webhook aktif "
-        f"di port {port}"
-    )
-
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=webhook_path.lstrip("/"),
-        webhook_url=webhook_url,
-        drop_pending_updates=True,
-    )
-
-
-if __name__ == "__main__":
-    main()
+        video
